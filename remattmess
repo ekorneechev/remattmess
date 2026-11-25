@@ -28,6 +28,7 @@ import mimetypes
 import logging
 import subprocess
 import argparse
+import tempfile
 
 from email import message_from_binary_file, encoders
 from email.mime.base import MIMEBase
@@ -114,6 +115,22 @@ def fix_slash(string):
     """Replace '#' -> '/' in filename attachment"""
     return string.replace('#','/')
 
+def write_msg(msg, msg_filename):
+    """Write message to a temporary file and atomically replace the original."""
+    directory = os.path.dirname(os.path.abspath(msg_filename))
+    fd, tmp_filename = tempfile.mkstemp(prefix=".remattmess-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as fp:
+            print(msg, file=fp)
+        os.chmod(tmp_filename, os.stat(msg_filename).st_mode & 0o7777)
+        os.replace(tmp_filename, msg_filename)
+    except Exception:
+        try:
+            os.unlink(tmp_filename)
+        except OSError:
+            pass
+        raise
+
 def update():
     "Updating script"
     print( "Checking version...")
@@ -174,9 +191,7 @@ def main(args):
     msg = msg_del_attach(msg)
     msg = update_msg (msg, msg_filename)
     try:
-        fp = open(msg_filename, "w")
-        print (msg, file=fp)
-        fp.close()
+        write_msg(msg, msg_filename)
         logging.debug( "File size 'after': %i KB" % ( os.path.getsize( msg_filename ) / 1024 ) )
         logging.info( "Attachments zeroing completed." )
         return 0
