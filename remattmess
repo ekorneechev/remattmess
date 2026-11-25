@@ -32,7 +32,7 @@ from email import message_from_binary_file
 from subprocess import check_output
 from shlex import quote
 
-VERSION = "0.6"
+VERSION = "0.7"
 
 def backup_attach(msg, msg_filename):
     dirname = "%s.backup" % msg_filename
