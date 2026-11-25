@@ -50,6 +50,21 @@ def backup_attach(msg, msg_filename):
             fp.close()
     return
 
+def is_attachment(part):
+    """Return True for file attachments, False for message body parts."""
+    if not part.get_filename():
+        return False
+    disposition = part.get('Content-Disposition')
+    if disposition:
+        disposition = disposition.split(';', 1)[0].strip().lower()
+    else:
+        disposition = ''
+    if disposition == 'inline':
+        return False
+    if disposition == 'attachment':
+        return True
+    return not part.get('Content-ID')
+
 def dd_attach(msg, msg_filename):
     """Search attach, save names, dd zero->file,"""
     attach_list=[]
@@ -62,27 +77,38 @@ def dd_attach(msg, msg_filename):
         logging.debug( e )
         exit (1)
     for part in msg.walk():
+        if not is_attachment(part):
+            continue
         filename = part.get_filename()
-        if filename:
-            attach_list.append(filename)
-            filename = filename.replace( '/', '#' ) #fix path
-            if len( filename ) > 170:
-                filename = filename[:150] + filename[-12:]
-            attachment = os.path.join( dirname, filename )
-            # write empty files (retaining mimtype)
-            try:
-                res = os.system( "touch %s" % quote( attachment ) )
-                if res:
-                    raise Exception ( "Touch error! The attachment \"%s\" has been deleted..." % attach_list[-1] )
-            except Exception as e:
-                attach_list.pop()
-                logging.error( "Unable to write empty attachment." )
-                logging.debug( e )
+        attach_list.append(filename)
+        filename = filename.replace( '/', '#' ) #fix path
+        if len( filename ) > 170:
+            filename = filename[:150] + filename[-12:]
+        attachment = os.path.join( dirname, filename )
+        # write empty files (retaining mimtype)
+        try:
+            res = os.system( "touch %s" % quote( attachment ) )
+            if res:
+                raise Exception ( "Touch error! The attachment \"%s\" has been deleted..." % attach_list[-1] )
+        except Exception as e:
+            attach_list.pop()
+            logging.error( "Unable to write empty attachment." )
+            logging.debug( e )
     return attach_list
 
 def msg_del_attach(msg):
-    body = msg.get_payload()[0]
-    msg.set_payload([body])
+    """Remove attachment parts, preserving the message body structure."""
+    if not msg.is_multipart():
+        return msg
+    payload = []
+    for part in msg.get_payload():
+        if is_attachment(part):
+            continue
+        msg_del_attach(part)
+        if part.is_multipart() and not part.get_payload():
+            continue
+        payload.append(part)
+    msg.set_payload(payload)
     return msg
 
 def update_msg(msg, msg_filename):
