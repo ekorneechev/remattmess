@@ -24,16 +24,11 @@
 
 import os
 import sys
-import mimetypes
 import logging
-import subprocess
 import argparse
 import tempfile
-import shutil
 
-from email import message_from_binary_file, encoders
-from email.mime.base import MIMEBase
-from shlex import quote
+from email import message_from_binary_file
 from subprocess import check_output
 
 VERSION = "0.6"
@@ -64,71 +59,15 @@ def is_attachment(part):
         return True
     return not part.get('Content-ID')
 
-def dd_attach(msg, dirname):
-    """Search attachments and create empty files for them."""
-    attach_list=[]
+def zero_attachments(msg):
+    """Zero attachment payloads in place, preserving their headers."""
+    attach_list = []
     for part in msg.walk():
         if not is_attachment(part):
             continue
-        filename = part.get_filename()
-        attach_list.append(filename)
-        filename = filename.replace( '/', '#' ) #fix path
-        if len( filename ) > 170:
-            filename = filename[:150] + filename[-12:]
-        attachment = os.path.join( dirname, filename )
-        # write empty files (retaining mimtype)
-        try:
-            res = os.system( "touch %s" % quote( attachment ) )
-            if res:
-                raise Exception ( "Touch error! The attachment \"%s\" has been deleted..." % attach_list[-1] )
-        except Exception as e:
-            attach_list.pop()
-            logging.error( "Unable to write empty attachment." )
-            logging.debug( e )
+        attach_list.append(part.get_filename())
+        part.set_payload("")
     return attach_list
-
-def msg_del_attach(msg):
-    """Remove attachment parts, preserving the message body structure."""
-    if not msg.is_multipart():
-        return msg
-    payload = []
-    for part in msg.get_payload():
-        if is_attachment(part):
-            continue
-        msg_del_attach(part)
-        if part.is_multipart() and not part.get_payload():
-            continue
-        payload.append(part)
-    msg.set_payload(payload)
-    return msg
-
-def update_msg(msg, dirname):
-    for filename in os.listdir(dirname):
-        path = os.path.join(dirname, filename)
-        if not os.path.isfile(path):
-            continue
-        ctype, encoding = mimetypes.guess_type(path)
-        if ctype is None or encoding is not None:
-            # No guess could be made, or the file is encoded (compressed), so
-            # use a generic bag-of-bits type.
-            ctype = 'application/octet-stream'
-        maintype, subtype = ctype.split('/', 1)
-        with open(path, 'rb') as fp:
-            attach = MIMEBase(maintype, subtype)
-            attach.set_payload(fp.read())
-        encoders.encode_base64(attach)
-        attach.add_header('Content-Disposition', 'attachment', filename=fix_slash(filename))
-        try:
-            msg.attach(attach)
-            logging.debug("Record empty file (%s) to message." % fix_slash(filename))
-        except Exception as e:
-            logging.error( "Unable to record file (%s) to message." % fix_slash( filename ) )
-            logging.debug( e )
-    return msg
-
-def fix_slash(string):
-    """Replace '#' -> '/' in filename attachment"""
-    return string.replace('#','/')
 
 def write_msg(msg, msg_filename):
     """Write message to a temporary file and atomically replace the original."""
@@ -195,26 +134,20 @@ def main(args):
 
     logging.info("Start 'remattmess'. File: %s" % msg_filename)
     logging.debug( "File size 'before': %i KB" % ( os.path.getsize( msg_filename ) / 1024 ) )
-    dirname = tempfile.mkdtemp(prefix="remattmess-")
+    attach_list = zero_attachments(msg)
+    if attach_list == []:
+        logging.info( "The message has no attachments." )
+        return 0
+    logging.debug( "Attachments to zeroing: %s" % ", ".join( attach_list ) )
     try:
-        attach_list = dd_attach(msg, dirname)
-        if attach_list == []:
-            logging.info( "The message has no attachments." )
-            return 0
-        logging.debug( "Attachments to zeroing: %s" % fix_slash( ", ".join( attach_list ) ) )
-        msg = msg_del_attach(msg)
-        msg = update_msg (msg, dirname)
-        try:
-            write_msg(msg, msg_filename)
-            logging.debug( "File size 'after': %i KB" % ( os.path.getsize( msg_filename ) / 1024 ) )
-            logging.info( "Attachments zeroing completed." )
-            return 0
-        except Exception as e:
-            logging.error( "Unable to write message to file." )
-            logging.debug( e )
-            return 1
-    finally:
-        shutil.rmtree(dirname, ignore_errors=True)
+        write_msg(msg, msg_filename)
+        logging.debug( "File size 'after': %i KB" % ( os.path.getsize( msg_filename ) / 1024 ) )
+        logging.info( "Attachments zeroing completed." )
+        return 0
+    except Exception as e:
+        logging.error( "Unable to write message to file." )
+        logging.debug( e )
+        return 1
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
