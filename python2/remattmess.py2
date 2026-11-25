@@ -45,19 +45,21 @@ def backup_attach(msg, msg_filename):
     return
 
 def is_attachment(part):
-    """Return True for file attachments, False for message body parts."""
-    if not part.get_filename():
+    """Return True for parts to zero, False for message body parts."""
+    if part.get_content_maintype() == 'multipart':
         return False
     disposition = part.get('Content-Disposition')
     if disposition:
         disposition = disposition.split(';', 1)[0].strip().lower()
     else:
         disposition = ''
-    if disposition == 'inline':
-        return False
     if disposition == 'attachment':
         return True
-    return not part.get('Content-ID')
+    if part.get_filename():
+        return True
+    if part.get_content_maintype() == 'text':
+        return False
+    return disposition == 'inline' or bool(part.get('Content-ID'))
 
 def zero_attachments(msg):
     """Zero attachment payloads in place, preserving their headers."""
@@ -65,7 +67,7 @@ def zero_attachments(msg):
     for part in msg.walk():
         if not is_attachment(part):
             continue
-        attach_list.append(part.get_filename())
+        attach_list.append(part.get_filename() or "(no name)")
         part.set_payload("")
     return attach_list
 
