@@ -1,6 +1,6 @@
 # remattmess
 
-Version: 0.6
+Version: 0.7
 
 ```
 usage: remattmess [-h] [-d] [-u] [-v] [FILE]
